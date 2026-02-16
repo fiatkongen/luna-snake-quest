@@ -97,9 +97,9 @@ const Game = {
     
     // Init snake at world origin
     this.snake = [
-      { x: 0, y: 0, dir: 'right' },
-      { x: -1, y: 0, dir: 'right' },
-      { x: -2, y: 0, dir: 'right' }
+      { x: 0, y: 0, prevX: 0, prevY: 0, dir: 'right' },
+      { x: -1, y: 0, prevX: -1, prevY: 0, dir: 'right' },
+      { x: -2, y: 0, prevX: -2, prevY: 0, dir: 'right' }
     ];
     
     this.camX = 0;
@@ -268,49 +268,56 @@ const Game = {
     this.direction = this.nextDirection;
     
     const head = this.snake[0];
-    const newHead = { x: head.x, y: head.y, dir: this.direction };
     
+    // Calculate new head position
+    let newX = head.x, newY = head.y;
     switch (this.direction) {
-      case 'up': newHead.y--; break;
-      case 'down': newHead.y++; break;
-      case 'left': newHead.x--; break;
-      case 'right': newHead.x++; break;
+      case 'up': newY--; break;
+      case 'down': newY++; break;
+      case 'left': newX--; break;
+      case 'right': newX++; break;
     }
     
     // NO wall collision — infinite world!
     
-    // Check self collision (skip if invincible)
+    // Check self collision at new head position (skip if invincible)
     if (!this.invincible) {
       for (let i = 0; i < this.snake.length; i++) {
-        if (this.snake[i].x === newHead.x && this.snake[i].y === newHead.y) {
+        if (this.snake[i].x === newX && this.snake[i].y === newY) {
           this._handleCollision(now);
           return;
         }
       }
     }
     
-    // Check obstacle collision
+    // Check obstacle collision at new head position
     if (!this.invincible) {
       for (const obs of this.obstacles) {
-        if (obs.x === newHead.x && obs.y === newHead.y) {
+        if (obs.x === newX && obs.y === newY) {
           this._handleCollision(now);
           return;
         }
       }
     }
     
-    // Save previous positions for interpolation
+    // === MOVEMENT: shift all segments forward ===
+    // 1. Save prev positions for ALL segments
     for (const seg of this.snake) {
       seg.prevX = seg.x;
       seg.prevY = seg.y;
     }
     
-    // New head's prev is current head position (so it animates from there)
-    newHead.prevX = head.x;
-    newHead.prevY = head.y;
+    // 2. Move body: each segment takes position of the one in front
+    for (let i = this.snake.length - 1; i > 0; i--) {
+      this.snake[i].x = this.snake[i - 1].x;
+      this.snake[i].y = this.snake[i - 1].y;
+      this.snake[i].dir = this.snake[i - 1].dir;
+    }
     
-    // Move
-    this.snake.unshift(newHead);
+    // 3. Move head to new position
+    head.x = newX;
+    head.y = newY;
+    head.dir = this.direction;
     
     // Maybe spawn more obstacles
     this._maybeSpawnMoreObstacles();
@@ -318,12 +325,12 @@ const Game = {
     // Check item pickup
     let ate = false;
     for (let i = this.items.length - 1; i >= 0; i--) {
-      if (this.items[i].x === newHead.x && this.items[i].y === newHead.y) {
+      if (this.items[i].x === newX && this.items[i].y === newY) {
         this.items.splice(i, 1);
         this.collected++;
         ate = true;
         
-        this._spawnParticles(newHead.x, newHead.y, 8);
+        this._spawnParticles(newX, newY, 8);
         
         Audio.playPickup();
         if (this.onItemCollected) this.onItemCollected(this.collected, this.level.itemsNeeded);
@@ -340,15 +347,18 @@ const Game = {
       }
     }
     
-    if (!ate) {
-      const removed = this.snake.pop();
-      // Keep ghost tail info on new last segment for smooth retraction
-      const newTail = this.snake[this.snake.length - 1];
-      if (newTail && removed) {
-        newTail.prevX = removed.prevX !== undefined ? removed.prevX : removed.x;
-        newTail.prevY = removed.prevY !== undefined ? removed.prevY : removed.y;
-      }
+    if (ate) {
+      // Grow: add new tail segment at the old tail position
+      const tail = this.snake[this.snake.length - 1];
+      this.snake.push({
+        x: tail.prevX,
+        y: tail.prevY,
+        prevX: tail.prevX,
+        prevY: tail.prevY,
+        dir: tail.dir
+      });
     }
+    // If not ate: nothing to do — the tail naturally moved forward
   },
 
   _handleCollision(now) {
@@ -372,13 +382,13 @@ const Game = {
     const cy = head.y;
     const prevLength = this.snake.length;
     
-    this.snake = [{ x: cx, y: cy, dir: 'right' }];
+    this.snake = [{ x: cx, y: cy, prevX: cx, prevY: cy, dir: 'right' }];
     this.direction = 'right';
     this.nextDirection = 'right';
     
     this.respawnQueue = [];
     for (let i = 1; i < prevLength; i++) {
-      this.respawnQueue.push({ x: cx - i, y: cy, dir: 'right' });
+      this.respawnQueue.push({ x: cx - i, y: cy, prevX: cx - i, prevY: cy, dir: 'right' });
     }
     this.lastRespawnTick = now;
     
