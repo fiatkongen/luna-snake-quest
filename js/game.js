@@ -30,6 +30,7 @@ const Game = {
   // Timing
   tickInterval: 180,
   lastTick: 0,
+  tickProgress: 1, // 0-1 interpolation between ticks
   running: false,
   animFrame: null,
   
@@ -250,10 +251,15 @@ const Game = {
       this._tick(now);
     }
     
-    // Smooth camera towards snake head
+    // Tick progress for smooth interpolation (0 = just ticked, 1 = about to tick)
+    this.tickProgress = Math.min(1, (now - this.lastTick) / this.tickInterval);
+    
+    // Smooth camera towards interpolated snake head
     const head = this.snake[0];
-    this.camX += (head.x - this.camX) * 0.15;
-    this.camY += (head.y - this.camY) * 0.15;
+    const headVisX = (head.prevX !== undefined) ? head.prevX + (head.x - head.prevX) * this.tickProgress : head.x;
+    const headVisY = (head.prevY !== undefined) ? head.prevY + (head.y - head.prevY) * this.tickProgress : head.y;
+    this.camX += (headVisX - this.camX) * 0.2;
+    this.camY += (headVisY - this.camY) * 0.2;
     
     this._draw(now);
   },
@@ -293,6 +299,16 @@ const Game = {
       }
     }
     
+    // Save previous positions for interpolation
+    for (const seg of this.snake) {
+      seg.prevX = seg.x;
+      seg.prevY = seg.y;
+    }
+    
+    // New head's prev is current head position (so it animates from there)
+    newHead.prevX = head.x;
+    newHead.prevY = head.y;
+    
     // Move
     this.snake.unshift(newHead);
     
@@ -325,7 +341,13 @@ const Game = {
     }
     
     if (!ate) {
-      this.snake.pop();
+      const removed = this.snake.pop();
+      // Keep ghost tail info on new last segment for smooth retraction
+      const newTail = this.snake[this.snake.length - 1];
+      if (newTail && removed) {
+        newTail.prevX = removed.prevX !== undefined ? removed.prevX : removed.x;
+        newTail.prevY = removed.prevY !== undefined ? removed.prevY : removed.y;
+      }
     }
   },
 
@@ -498,11 +520,9 @@ const Game = {
     const blinking = this.invincible && now < this.invincibleUntil;
     if (!blinking || Math.floor(now / 120) % 2 === 0) {
       ctx.save();
-      // SnakeRenderer expects segments in local pixel coords (x * cellSize, y * cellSize)
-      // We need to translate so that world coords map to screen
       const origin = this._worldToScreen(0, 0);
       ctx.translate(origin.x - cs/2, origin.y - cs/2);
-      SnakeRenderer.drawSnake(ctx, this.snake, cs, this.level, now);
+      SnakeRenderer.drawSnake(ctx, this.snake, cs, this.level, now, this.tickProgress);
       ctx.restore();
     }
     

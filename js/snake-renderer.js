@@ -1,13 +1,19 @@
-// snake-renderer.js — Canvas-drawn snakes with color tinting
+// snake-renderer.js — Canvas-drawn snakes with smooth interpolation
 const SnakeRenderer = {
-  drawSnake(ctx, segments, cellSize, level, time) {
+  drawSnake(ctx, segments, cellSize, level, time, tickProgress = 1) {
     if (segments.length === 0) return;
     const { snakeColor, isRainbow } = level;
+    const t = tickProgress;
     
     for (let i = segments.length - 1; i >= 0; i--) {
       const seg = segments[i];
-      const x = seg.x * cellSize;
-      const y = seg.y * cellSize;
+      
+      // Interpolate position for smooth movement
+      const visX = (seg.prevX !== undefined) ? seg.prevX + (seg.x - seg.prevX) * t : seg.x;
+      const visY = (seg.prevY !== undefined) ? seg.prevY + (seg.y - seg.prevY) * t : seg.y;
+      const x = visX * cellSize;
+      const y = visY * cellSize;
+      
       const isHead = i === 0;
       const isTail = i === segments.length - 1;
       
@@ -37,7 +43,6 @@ const SnakeRenderer = {
     const pad = cs * 0.05;
     const r = cs * 0.2;
     
-    // Head shape (rounded rect)
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.roundRect(x + pad, y + pad, cs - pad * 2, cs - pad * 2, r);
@@ -56,7 +61,7 @@ const SnakeRenderer = {
     const cx = x + cs / 2;
     const cy = y + cs / 2;
     
-    if (dir === 'up')    { e1x = cx - cs*0.2; e1y = cy - cs*0.15; e2x = cx + cs*0.2; e2y = cy - cs*0.15; }
+    if (dir === 'up')         { e1x = cx - cs*0.2; e1y = cy - cs*0.15; e2x = cx + cs*0.2; e2y = cy - cs*0.15; }
     else if (dir === 'down')  { e1x = cx - cs*0.2; e1y = cy + cs*0.15; e2x = cx + cs*0.2; e2y = cy + cs*0.15; }
     else if (dir === 'left')  { e1x = cx - cs*0.15; e1y = cy - cs*0.2; e2x = cx - cs*0.15; e2y = cy + cs*0.2; }
     else                      { e1x = cx + cs*0.15; e1y = cy - cs*0.2; e2x = cx + cs*0.15; e2y = cy + cs*0.2; }
@@ -66,11 +71,16 @@ const SnakeRenderer = {
     ctx.beginPath(); ctx.arc(e1x, e1y, eyeSize, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(e2x, e2y, eyeSize, 0, Math.PI * 2); ctx.fill();
     
-    // Pupils (slightly animated)
+    // Pupils (look in direction of movement + slight animation)
     const px = Math.sin(time * 0.003) * 1.5;
+    let pdx = 0, pdy = 0;
+    if (dir === 'left') pdx = -2;
+    else if (dir === 'right') pdx = 2;
+    else if (dir === 'up') pdy = -2;
+    else if (dir === 'down') pdy = 2;
     ctx.fillStyle = '#222';
-    ctx.beginPath(); ctx.arc(e1x + px, e1y, pupilSize, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(e2x + px, e2y, pupilSize, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(e1x + pdx + px, e1y + pdy, pupilSize, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(e2x + pdx + px, e2y + pdy, pupilSize, 0, Math.PI * 2); ctx.fill();
     
     // Cute blush
     ctx.fillStyle = 'rgba(255,150,150,0.3)';
@@ -109,7 +119,6 @@ const SnakeRenderer = {
     ctx.fill();
   },
 
-  // Draw a preview snake for level intro/unlock screens
   drawPreview(canvas, level) {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
@@ -126,13 +135,11 @@ const SnakeRenderer = {
     for (let i = 0; i < 6; i++) {
       segments.push({ x: 1.5 + i * 0.95, y: 2, dir: 'right' });
     }
-    // Reverse so head is rightmost
     segments.reverse();
     
-    // Scale context to fit
     ctx.save();
     ctx.translate(10, 5);
-    this.drawSnake(ctx, segments, cs, level, Date.now());
+    this.drawSnake(ctx, segments, cs, level, Date.now(), 1);
     ctx.restore();
   }
 };
