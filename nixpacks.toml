@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_22", "python3"]
+nixPkgs = ["nodejs_22"]
 
-[phases.build]
-cmds = ["echo 'Static site - no build needed'"]
+[phases.install]
+cmds = ["npm install"]
 
 [start]
-cmd = "npx serve . -l 3000 -s"
+cmd = "npx serve -s . -l $PORT --no-clipboard"
