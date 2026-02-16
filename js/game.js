@@ -1,15 +1,17 @@
-// game.js — Core game engine
+// game.js — Core game engine (infinite world, camera follows snake)
 const Game = {
   canvas: null,
   ctx: null,
   dpr: 1,
   
-  // Grid
-  cols: 17,
-  rows: 17,
+  // Grid (visible area size, not bounds)
+  viewCols: 17,
+  viewRows: 17,
   cellSize: 0,
-  offsetX: 0,
-  offsetY: 0,
+  
+  // Camera (world coords, centered on snake head)
+  camX: 0,
+  camY: 0,
   
   // Background images
   bgImages: {},
@@ -34,7 +36,8 @@ const Game = {
   // Respawn
   invincible: false,
   invincibleUntil: 0,
-  respawnQueue: [], // for gradual body respawn
+  respawnQueue: [],
+  lastRespawnTick: 0,
   
   // Particles
   particles: [],
@@ -71,14 +74,12 @@ const Game = {
     this.canvas.style.width = w + 'px';
     this.canvas.style.height = h + 'px';
     
-    // Calculate cell size to fit grid with padding for HUD
     const hudHeight = 60;
     const padding = 10;
     const availW = w - padding * 2;
     const availH = h - hudHeight - padding * 2;
-    this.cellSize = Math.floor(Math.min(availW / this.cols, availH / this.rows));
-    this.offsetX = Math.floor((w - this.cols * this.cellSize) / 2);
-    this.offsetY = hudHeight + Math.floor((availH - this.rows * this.cellSize) / 2);
+    this.cellSize = Math.floor(Math.min(availW / this.viewCols, availH / this.viewRows));
+    this.hudHeight = hudHeight;
   },
 
   startLevel(levelIdx) {
@@ -93,16 +94,17 @@ const Game = {
     this.particles = [];
     this.respawnQueue = [];
     
-    // Init snake in center
-    const cx = Math.floor(this.cols / 2);
-    const cy = Math.floor(this.rows / 2);
+    // Init snake at world origin
     this.snake = [
-      { x: cx, y: cy, dir: 'right' },
-      { x: cx - 1, y: cy, dir: 'right' },
-      { x: cx - 2, y: cy, dir: 'right' }
+      { x: 0, y: 0, dir: 'right' },
+      { x: -1, y: 0, dir: 'right' },
+      { x: -2, y: 0, dir: 'right' }
     ];
     
-    // Generate obstacles
+    this.camX = 0;
+    this.camY = 0;
+    
+    // Generate obstacles around start area
     this._generateObstacles();
     
     // Place items
@@ -124,7 +126,6 @@ const Game = {
   },
 
   _onSwipe(dir) {
-    // Prevent reversing into self
     const opposite = { up: 'down', down: 'up', left: 'right', right: 'left' };
     if (dir !== opposite[this.direction]) {
       this.nextDirection = dir;
@@ -136,20 +137,67 @@ const Game = {
     const count = this.level.obstacles;
     const occupied = new Set();
     
-    // Mark snake area as occupied
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -2; dy <= 2; dy++) {
-        const cx = Math.floor(this.cols / 2) + dx;
-        const cy = Math.floor(this.rows / 2) + dy;
-        occupied.add(`${cx},${cy}`);
+    // Mark snake area as occupied (generous zone)
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dy = -4; dy <= 4; dy++) {
+        occupied.add(`${dx},${dy}`);
       }
     }
     
+    // Spawn obstacles in a ring around the start
+    const spawnRadius = 12;
     for (let i = 0; i < count; i++) {
       let attempts = 0;
       while (attempts < 100) {
-        const x = 1 + Math.floor(Math.random() * (this.cols - 2));
-        const y = 1 + Math.floor(Math.random() * (this.rows - 2));
+        const x = Math.floor(Math.random() * spawnRadius * 2) - spawnRadius;
+        const y = Math.floor(Math.random() * spawnRadius * 2) - spawnRadius;
+        const key = `${x},${y}`;
+        if (!occupied.has(key)) {
+          this.obstacles.push({ x, y });
+          occupied.add(key);
+          break;
+        }
+        attempts++;
+      }
+    }
+  },
+
+  // Spawn more obstacles as snake explores further out
+  _maybeSpawnMoreObstacles() {
+    if (this.level.obstacles === 0) return;
+    const head = this.snake[0];
+    const halfView = Math.floor(this.viewCols / 2) + 2;
+    
+    // Remove obstacles far away (cleanup)
+    this.obstacles = this.obstacles.filter(o => 
+      Math.abs(o.x - head.x) < 40 && Math.abs(o.y - head.y) < 40
+    );
+    
+    // Keep roughly the same density
+    const targetCount = this.level.obstacles;
+    if (this.obstacles.length >= targetCount) return;
+    
+    const occupied = new Set();
+    this.snake.forEach(s => occupied.add(`${s.x},${s.y}`));
+    this.items.forEach(it => occupied.add(`${it.x},${it.y}`));
+    this.obstacles.forEach(o => occupied.add(`${o.x},${o.y}`));
+    
+    // Safe zone around head
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -3; dy <= 3; dy++) {
+        occupied.add(`${head.x + dx},${head.y + dy}`);
+      }
+    }
+    
+    const needed = targetCount - this.obstacles.length;
+    for (let i = 0; i < needed; i++) {
+      let attempts = 0;
+      while (attempts < 50) {
+        // Spawn at edge of visible area
+        const angle = Math.random() * Math.PI * 2;
+        const dist = halfView + 2 + Math.floor(Math.random() * 5);
+        const x = head.x + Math.round(Math.cos(angle) * dist);
+        const y = head.y + Math.round(Math.sin(angle) * dist);
         const key = `${x},${y}`;
         if (!occupied.has(key)) {
           this.obstacles.push({ x, y });
@@ -162,21 +210,28 @@ const Game = {
   },
 
   _spawnItem() {
+    const head = this.snake[0];
     const occupied = new Set();
     this.snake.forEach(s => occupied.add(`${s.x},${s.y}`));
     this.obstacles.forEach(o => occupied.add(`${o.x},${o.y}`));
     this.items.forEach(it => occupied.add(`${it.x},${it.y}`));
     
+    // Spawn within visible area but not too close
+    const halfView = Math.floor(this.viewCols / 2);
     let attempts = 0;
     while (attempts < 200) {
-      const x = Math.floor(Math.random() * this.cols);
-      const y = Math.floor(Math.random() * this.rows);
+      const x = head.x + Math.floor(Math.random() * (halfView * 2)) - halfView;
+      const y = head.y + Math.floor(Math.random() * (halfView * 2)) - halfView;
+      // Not too close to head
+      if (Math.abs(x - head.x) + Math.abs(y - head.y) < 3) { attempts++; continue; }
       if (!occupied.has(`${x},${y}`)) {
         this.items.push({ x, y });
         return;
       }
       attempts++;
     }
+    // Fallback: spawn somewhere nearby
+    this.items.push({ x: head.x + 5, y: head.y + 3 });
   },
 
   _loop(now) {
@@ -195,6 +250,11 @@ const Game = {
       this._tick(now);
     }
     
+    // Smooth camera towards snake head
+    const head = this.snake[0];
+    this.camX += (head.x - this.camX) * 0.15;
+    this.camY += (head.y - this.camY) * 0.15;
+    
     this._draw(now);
   },
 
@@ -211,11 +271,7 @@ const Game = {
       case 'right': newHead.x++; break;
     }
     
-    // Check wall collision
-    if (newHead.x < 0 || newHead.x >= this.cols || newHead.y < 0 || newHead.y >= this.rows) {
-      this._handleCollision(now);
-      return;
-    }
+    // NO wall collision — infinite world!
     
     // Check self collision (skip if invincible)
     if (!this.invincible) {
@@ -240,6 +296,9 @@ const Game = {
     // Move
     this.snake.unshift(newHead);
     
+    // Maybe spawn more obstacles
+    this._maybeSpawnMoreObstacles();
+    
     // Check item pickup
     let ate = false;
     for (let i = this.items.length - 1; i >= 0; i--) {
@@ -248,7 +307,6 @@ const Game = {
         this.collected++;
         ate = true;
         
-        // Spawn particles
         this._spawnParticles(newHead.x, newHead.y, 8);
         
         Audio.playPickup();
@@ -261,14 +319,13 @@ const Game = {
           return;
         }
         
-        // Spawn next item
         this._spawnItem();
         break;
       }
     }
     
     if (!ate) {
-      this.snake.pop(); // Remove tail if didn't eat
+      this.snake.pop();
     }
   },
 
@@ -276,7 +333,6 @@ const Game = {
     this.lives--;
     Audio.playHurt();
     
-    // Spawn hurt particles
     const head = this.snake[0];
     this._spawnParticles(head.x, head.y, 12, '#ff4444');
     
@@ -289,35 +345,51 @@ const Game = {
       return;
     }
     
-    // Respawn: head in center, body spawns gradually
-    const cx = Math.floor(this.cols / 2);
-    const cy = Math.floor(this.rows / 2);
+    // Respawn at current head position (don't teleport)
+    const cx = head.x;
+    const cy = head.y;
     const prevLength = this.snake.length;
     
     this.snake = [{ x: cx, y: cy, dir: 'right' }];
     this.direction = 'right';
     this.nextDirection = 'right';
     
-    // Queue remaining segments for gradual respawn
     this.respawnQueue = [];
     for (let i = 1; i < prevLength; i++) {
       this.respawnQueue.push({ x: cx - i, y: cy, dir: 'right' });
     }
     this.lastRespawnTick = now;
     
-    // Brief invincibility
+    // Clear nearby obstacles so respawn isn't instant death
+    this.obstacles = this.obstacles.filter(o =>
+      Math.abs(o.x - cx) > 3 || Math.abs(o.y - cy) > 3
+    );
+    
     this.invincible = true;
     this.invincibleUntil = now + 2000;
   },
 
+  // Convert world coordinates to screen pixel coordinates
+  _worldToScreen(wx, wy) {
+    const w = this.canvas.width / this.dpr;
+    const h = this.canvas.height / this.dpr;
+    const screenCX = w / 2;
+    const screenCY = this.hudHeight + (h - this.hudHeight) / 2;
+    
+    return {
+      x: screenCX + (wx - this.camX) * this.cellSize,
+      y: screenCY + (wy - this.camY) * this.cellSize
+    };
+  },
+
   _spawnParticles(gx, gy, count, color) {
-    const px = this.offsetX + gx * this.cellSize + this.cellSize / 2;
-    const py = this.offsetY + gy * this.cellSize + this.cellSize / 2;
+    // Store in world coords
     for (let i = 0; i < count; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 1 + Math.random() * 3;
       this.particles.push({
-        x: px, y: py,
+        wx: gx, wy: gy, // world grid position (for screen conversion)
+        ox: 0, oy: 0, // pixel offset from grid cell center
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         life: 1,
@@ -336,6 +408,7 @@ const Game = {
     
     const w = this.canvas.width / dpr;
     const h = this.canvas.height / dpr;
+    const cs = this.cellSize;
     
     // Background
     ctx.fillStyle = this.level ? this.level.bgColor : '#1a0a2e';
@@ -343,89 +416,93 @@ const Game = {
     
     if (!this.level) { ctx.restore(); return; }
     
-    // Grid area
-    const gx = this.offsetX;
-    const gy = this.offsetY;
-    const gw = this.cols * this.cellSize;
-    const gh = this.rows * this.cellSize;
+    // Calculate visible grid range
+    const halfCols = Math.ceil(w / cs / 2) + 1;
+    const halfRows = Math.ceil(h / cs / 2) + 1;
+    const camFloorX = Math.floor(this.camX);
+    const camFloorY = Math.floor(this.camY);
     
-    // Background image
+    // Background image (tiled across visible area)
     const bgImg = this.bgImages[this.levelIdx];
     if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
       ctx.save();
-      ctx.globalAlpha = 0.35;
-      ctx.drawImage(bgImg, gx, gy, gw, gh);
+      ctx.globalAlpha = 0.2;
+      // Tile the bg image across the viewport
+      const tileSize = this.viewCols * cs;
+      const startWX = camFloorX - halfCols;
+      const startWY = camFloorY - halfRows;
+      const tileStartX = Math.floor(startWX / this.viewCols) * this.viewCols;
+      const tileStartY = Math.floor(startWY / this.viewRows) * this.viewRows;
+      for (let tx = tileStartX; tx < camFloorX + halfCols + this.viewCols; tx += this.viewCols) {
+        for (let ty = tileStartY; ty < camFloorY + halfRows + this.viewRows; ty += this.viewRows) {
+          const sp = this._worldToScreen(tx, ty);
+          ctx.drawImage(bgImg, sp.x, sp.y, tileSize, tileSize);
+        }
+      }
       ctx.restore();
     }
     
-    // Grid background overlay
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.fillRect(gx, gy, gw, gh);
-    
-    // Grid lines
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    // Grid lines (infinite, subtle)
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
     ctx.lineWidth = 0.5;
-    for (let c = 0; c <= this.cols; c++) {
+    for (let gx = camFloorX - halfCols; gx <= camFloorX + halfCols; gx++) {
+      const sp = this._worldToScreen(gx, 0);
       ctx.beginPath();
-      ctx.moveTo(gx + c * this.cellSize, gy);
-      ctx.lineTo(gx + c * this.cellSize, gy + gh);
+      ctx.moveTo(sp.x, 0);
+      ctx.lineTo(sp.x, h);
       ctx.stroke();
     }
-    for (let r = 0; r <= this.rows; r++) {
+    for (let gy = camFloorY - halfRows; gy <= camFloorY + halfRows; gy++) {
+      const sp = this._worldToScreen(0, gy);
       ctx.beginPath();
-      ctx.moveTo(gx, gy + r * this.cellSize);
-      ctx.lineTo(gx + gw, gy + r * this.cellSize);
+      ctx.moveTo(0, sp.y);
+      ctx.lineTo(w, sp.y);
       ctx.stroke();
     }
-    
-    // Border
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(gx, gy, gw, gh);
     
     // Obstacles
     for (const obs of this.obstacles) {
-      const ox = gx + obs.x * this.cellSize;
-      const oy = gy + obs.y * this.cellSize;
-      const cs = this.cellSize;
+      const sp = this._worldToScreen(obs.x, obs.y);
+      if (sp.x < -cs || sp.x > w + cs || sp.y < -cs || sp.y > h + cs) continue;
       ctx.fillStyle = this.level.obstacleColor;
       ctx.beginPath();
-      ctx.roundRect(ox + 2, oy + 2, cs - 4, cs - 4, 4);
+      ctx.roundRect(sp.x - cs/2 + 2, sp.y - cs/2 + 2, cs - 4, cs - 4, 4);
       ctx.fill();
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
       ctx.beginPath();
-      ctx.roundRect(ox + 4, oy + 4, cs - 8, (cs - 8) * 0.4, 3);
+      ctx.roundRect(sp.x - cs/2 + 4, sp.y - cs/2 + 4, cs - 8, (cs - 8) * 0.4, 3);
       ctx.fill();
     }
     
     // Items with glow and bob
     for (const item of this.items) {
-      const ix = gx + item.x * this.cellSize + this.cellSize / 2;
-      const iy = gy + item.y * this.cellSize + this.cellSize / 2;
+      const sp = this._worldToScreen(item.x, item.y);
+      if (sp.x < -cs*2 || sp.x > w + cs*2 || sp.y < -cs*2 || sp.y > h + cs*2) continue;
       const bob = Math.sin(now * 0.004) * 3;
       
-      // Glow
-      const grad = ctx.createRadialGradient(ix, iy + bob, 0, ix, iy + bob, this.cellSize * 0.8);
+      const grad = ctx.createRadialGradient(sp.x, sp.y + bob, 0, sp.x, sp.y + bob, cs * 0.8);
       grad.addColorStop(0, 'rgba(255,255,200,0.3)');
       grad.addColorStop(1, 'rgba(255,255,200,0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(ix, iy + bob, this.cellSize * 0.8, 0, Math.PI * 2);
+      ctx.arc(sp.x, sp.y + bob, cs * 0.8, 0, Math.PI * 2);
       ctx.fill();
       
-      // Emoji
-      ctx.font = `${this.cellSize * 0.7}px sans-serif`;
+      ctx.font = `${cs * 0.7}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(this.level.itemEmoji, ix, iy + bob);
+      ctx.fillText(this.level.itemEmoji, sp.x, sp.y + bob);
     }
     
     // Snake
     const blinking = this.invincible && now < this.invincibleUntil;
     if (!blinking || Math.floor(now / 120) % 2 === 0) {
       ctx.save();
-      ctx.translate(gx, gy);
-      SnakeRenderer.drawSnake(ctx, this.snake, this.cellSize, this.level, now);
+      // SnakeRenderer expects segments in local pixel coords (x * cellSize, y * cellSize)
+      // We need to translate so that world coords map to screen
+      const origin = this._worldToScreen(0, 0);
+      ctx.translate(origin.x - cs/2, origin.y - cs/2);
+      SnakeRenderer.drawSnake(ctx, this.snake, cs, this.level, now);
       ctx.restore();
     }
     
@@ -437,18 +514,21 @@ const Game = {
     // Particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.05; // gravity
+      p.ox += p.vx;
+      p.oy += p.vy;
+      p.vy += 0.05;
       p.life -= p.decay;
       if (p.life <= 0) {
         this.particles.splice(i, 1);
         continue;
       }
+      const sp = this._worldToScreen(p.wx, p.wy);
+      const px = sp.x + p.ox;
+      const py = sp.y + p.oy;
       ctx.globalAlpha = p.life;
       ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.arc(px, py, p.size * p.life, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
