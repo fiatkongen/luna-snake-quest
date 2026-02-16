@@ -1,0 +1,8 @@
+{
+  "name": "luna-snake-quest",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "serve": "^14.0.0"
+  }
+}
