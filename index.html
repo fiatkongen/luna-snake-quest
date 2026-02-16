@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Snake Quest">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <title>Luna's Snake Quest</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+    
+    <!-- Title Screen -->
+    <div id="title-screen" class="screen active">
+      <div class="title-content">
+        <h1 class="game-title">🐍✨ Luna's<br>Snake Quest ✨🐍</h1>
+        <p class="subtitle">Et magisk eventyr!</p>
+        <button id="btn-play" class="btn btn-play">▶ Spil!</button>
+        <button id="btn-levels" class="btn btn-secondary">🗺️ Vælg Level</button>
+      </div>
+    </div>
+
+    <!-- Level Select -->
+    <div id="level-select" class="screen">
+      <h2 class="screen-title">Vælg Level</h2>
+      <div id="level-grid" class="level-grid"></div>
+      <button id="btn-back-title" class="btn btn-secondary">← Tilbage</button>
+    </div>
+
+    <!-- Level Intro -->
+    <div id="level-intro" class="screen">
+      <div class="intro-content">
+        <h2 id="intro-world-name" class="world-name"></h2>
+        <div id="intro-snake-preview" class="snake-preview"></div>
+        <p id="intro-snake-name" class="snake-name"></p>
+        <p id="intro-goal" class="goal-text"></p>
+        <button id="btn-start-level" class="btn btn-play">Start! 🎮</button>
+      </div>
+    </div>
+
+    <!-- HUD (during gameplay) -->
+    <div id="hud" class="hud hidden">
+      <div class="hud-left">
+        <span id="hud-hearts"></span>
+      </div>
+      <div class="hud-center">
+        <span id="hud-level"></span>
+      </div>
+      <div class="hud-right">
+        <span id="hud-items"></span>
+      </div>
+      <button id="btn-mute" class="btn-mute">🔊</button>
+    </div>
+
+    <!-- Level Complete -->
+    <div id="level-complete" class="screen">
+      <div class="celebration-content">
+        <h2 class="congrats">🎉 Godt klaret! 🎉</h2>
+        <p id="complete-message" class="complete-msg"></p>
+        <div id="complete-snake-preview" class="snake-preview"></div>
+        <p id="complete-snake-name" class="snake-name"></p>
+        <button id="btn-next-level" class="btn btn-play">Næste Level →</button>
+        <button id="btn-complete-menu" class="btn btn-secondary">🏠 Menu</button>
+      </div>
+    </div>
+
+    <!-- Game Over -->
+    <div id="game-over" class="screen">
+      <div class="gameover-content">
+        <h2 class="gameover-title">💫 Ups! 💫</h2>
+        <p class="gameover-text">Ikke gi' op — du kan godt!</p>
+        <button id="btn-retry" class="btn btn-play">🔄 Prøv igen!</button>
+        <button id="btn-gameover-menu" class="btn btn-secondary">🏠 Menu</button>
+      </div>
+    </div>
+
+    <!-- Win Screen (all 10 levels complete) -->
+    <div id="win-screen" class="screen">
+      <div class="win-content">
+        <h2 class="win-title">👑 Du klarede det! 👑</h2>
+        <p class="win-text">Alle 10 slanger er fundet!<br>Du er den bedste slangetæmmer!</p>
+        <button id="btn-win-menu" class="btn btn-play">🏠 Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/storage.js"></script>
+  <script src="js/levels.js"></script>
+  <script src="js/snake-renderer.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
